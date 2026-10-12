@@ -1,0 +1,332 @@
+{
+  "version": 1,
+  "description": "Relay runtime routing rules, shared by the iOS, Android and Web suites. Each client drives its own pure functions from these cases and asserts the same output, so a rule cannot be changed on one platform and quietly diverge on the other two.",
+  "imageRoute": {
+    "describe": "Which image-generation route a relay transport resolves to.",
+    "cases": [
+      {
+        "id": "IR-01",
+        "transport": "openai_responses",
+        "expected": "inlineResponsesTool"
+      },
+      {
+        "id": "IR-02",
+        "transport": "openai_chat_completions",
+        "expected": "imagesEndpoint"
+      },
+      {
+        "id": "IR-03",
+        "transport": "anthropic_messages",
+        "expected": "unsupported"
+      },
+      {
+        "id": "IR-04",
+        "transport": "gemini_generate_content",
+        "expected": "geminiModality"
+      },
+      {
+        "id": "IR-05",
+        "transport": "auto",
+        "expected": "imagesEndpoint"
+      }
+    ]
+  },
+  "codexIdentityHeaders": {
+    "describe": "The Codex CLI identity headers - its user agent, the originator, a session id and OpenAI-Beta - are attached only on the Responses transport. Endpoints that accept a Codex subscription have been seen to route the request upstream only when at least one of the session id and OpenAI-Beta is present, so all four travel together rather than being treated as optional extras.",
+    "cases": [
+      {
+        "id": "CI-01",
+        "transport": "openai_responses",
+        "requiresCodexUA": true,
+        "requiresOriginator": true,
+        "requiresSessionID": true,
+        "requiresOpenAIBeta": true
+      },
+      {
+        "id": "CI-02",
+        "transport": "auto",
+        "requiresCodexUA": false,
+        "requiresOriginator": false,
+        "requiresSessionID": false,
+        "requiresOpenAIBeta": false
+      },
+      {
+        "id": "CI-03",
+        "transport": "openai_chat_completions",
+        "requiresCodexUA": false,
+        "requiresOriginator": false,
+        "requiresSessionID": false,
+        "requiresOpenAIBeta": false
+      },
+      {
+        "id": "CI-04",
+        "transport": "anthropic_messages",
+        "requiresCodexUA": false,
+        "requiresOriginator": false,
+        "requiresSessionID": false,
+        "requiresOpenAIBeta": false
+      },
+      {
+        "id": "CI-05",
+        "transport": "gemini_generate_content",
+        "requiresCodexUA": false,
+        "requiresOriginator": false,
+        "requiresSessionID": false,
+        "requiresOpenAIBeta": false
+      }
+    ]
+  },
+  "shouldForceStream": {
+    "describe": "stream=true is forced only for image generation over the Responses transport. Every other combination leaves the caller's own choice alone.",
+    "cases": [
+      {
+        "id": "FS-01",
+        "transport": "openai_responses",
+        "capabilities": [
+          "imageGen"
+        ],
+        "expected": true
+      },
+      {
+        "id": "FS-02",
+        "transport": "auto",
+        "capabilities": [
+          "imageGen"
+        ],
+        "expected": false
+      },
+      {
+        "id": "FS-03",
+        "transport": "openai_responses",
+        "capabilities": [
+          "text"
+        ],
+        "expected": false
+      },
+      {
+        "id": "FS-04",
+        "transport": "openai_chat_completions",
+        "capabilities": [
+          "imageGen"
+        ],
+        "expected": false
+      },
+      {
+        "id": "FS-05",
+        "transport": "gemini_generate_content",
+        "capabilities": [
+          "imageGen"
+        ],
+        "expected": false
+      },
+      {
+        "id": "FS-06",
+        "transport": "anthropic_messages",
+        "capabilities": [
+          "imageGen"
+        ],
+        "expected": false
+      }
+    ]
+  },
+  "isDedicatedImageModel": {
+    "describe": "Recognising an image-only OpenAI model, case-insensitively. The answer decides whether a separate chat model has to drive the conversation.",
+    "cases": [
+      {
+        "id": "DI-01",
+        "modelID": "gpt-image-1",
+        "expected": true
+      },
+      {
+        "id": "DI-02",
+        "modelID": "gpt-image-2",
+        "expected": true
+      },
+      {
+        "id": "DI-03",
+        "modelID": "chatgpt-image-1",
+        "expected": true
+      },
+      {
+        "id": "DI-04",
+        "modelID": "GPT-IMAGE-2",
+        "expected": true
+      },
+      {
+        "id": "DI-05",
+        "modelID": "gpt-5.4",
+        "expected": false
+      },
+      {
+        "id": "DI-06",
+        "modelID": "claude-4-sonnet",
+        "expected": false
+      },
+      {
+        "id": "DI-07",
+        "modelID": "gemini-2.5-flash",
+        "expected": false
+      }
+    ]
+  },
+  "pickChatDriverModelID": {
+    "describe": "Choosing the model that drives the conversation. A model that is not image-only drives it itself; an image-only one hands over to the default model, or else to the first available non-image model in the list. When the list holds nothing else, the result is missingChatDriverModel.",
+    "cases": [
+      {
+        "id": "PC-01",
+        "note": "The current model is a chat model, so it drives the conversation itself.",
+        "currentModelID": "gpt-5.4",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "capabilities": [
+              "text"
+            ],
+            "available": true,
+            "isDefault": true
+          },
+          {
+            "id": "gpt-image-2",
+            "capabilities": [
+              "text",
+              "imageGen"
+            ],
+            "available": true,
+            "isDefault": false
+          }
+        ],
+        "expectedSuccess": "gpt-5.4"
+      },
+      {
+        "id": "PC-02",
+        "note": "The current model is image-only, so the default model takes over.",
+        "currentModelID": "gpt-image-2",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "capabilities": [
+              "text"
+            ],
+            "available": true,
+            "isDefault": true
+          },
+          {
+            "id": "gpt-image-2",
+            "capabilities": [
+              "text",
+              "imageGen"
+            ],
+            "available": true,
+            "isDefault": false
+          }
+        ],
+        "expectedSuccess": "gpt-5.4"
+      },
+      {
+        "id": "PC-03",
+        "note": "Both the current and the default model are image-only, so the first available non-image model in the list takes over.",
+        "currentModelID": "gpt-image-2",
+        "models": [
+          {
+            "id": "gpt-image-2",
+            "capabilities": [
+              "text",
+              "imageGen"
+            ],
+            "available": true,
+            "isDefault": true
+          },
+          {
+            "id": "claude-4-sonnet",
+            "capabilities": [
+              "text"
+            ],
+            "available": true,
+            "isDefault": false
+          }
+        ],
+        "expectedSuccess": "claude-4-sonnet"
+      },
+      {
+        "id": "PC-04",
+        "note": "Every model in the list is image-only, so there is no chat driver to fall back to.",
+        "currentModelID": "gpt-image-2",
+        "models": [
+          {
+            "id": "gpt-image-2",
+            "capabilities": [
+              "text",
+              "imageGen"
+            ],
+            "available": true,
+            "isDefault": true
+          }
+        ],
+        "expectedError": "missingChatDriverModel"
+      },
+      {
+        "id": "PC-05",
+        "note": "A chat model exists but is unavailable, so the search continues to the next available one.",
+        "currentModelID": "gpt-image-2",
+        "models": [
+          {
+            "id": "gpt-image-2",
+            "capabilities": [
+              "text",
+              "imageGen"
+            ],
+            "available": true,
+            "isDefault": true
+          },
+          {
+            "id": "gpt-5.4",
+            "capabilities": [
+              "text"
+            ],
+            "available": false,
+            "isDefault": false
+          },
+          {
+            "id": "claude-4-haiku",
+            "capabilities": [
+              "text"
+            ],
+            "available": true,
+            "isDefault": false
+          }
+        ],
+        "expectedSuccess": "claude-4-haiku"
+      },
+      {
+        "id": "PC-06",
+        "note": "iOS gives a manually added relay model an internal id prefixed with `relay-manual-`. Both the image-only check and the returned id must use the upstream id with that prefix removed.",
+        "platform": "ios",
+        "currentModelID": "relay-manual-gpt-image-2",
+        "models": [
+          {
+            "id": "relay-manual-gpt-image-2",
+            "capabilities": [
+              "text",
+              "imageGen"
+            ],
+            "available": true,
+            "isDefault": true
+          },
+          {
+            "id": "relay-manual-gpt-5.5",
+            "capabilities": [
+              "text"
+            ],
+            "available": true,
+            "isDefault": false
+          }
+        ],
+        "expectedSuccess": "gpt-5.5"
+      }
+    ]
+  },
+  "systemInstructions": {
+    "extending": "When adding a new capability / transport: (1) add the matching id to this fixture; (2) update the pure-function implementation on all three clients at the same time; (3) run each client's test against this fixture until every assertion passes. Any client that changes the rule without going through this fixture fails its regression tests.",
+    "acceptanceBarrier": "All three clients must generate their input from this same fixture; no client may hardcode a way around it."
+  }
+}

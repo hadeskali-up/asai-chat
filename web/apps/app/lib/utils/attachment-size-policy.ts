@@ -1,0 +1,70 @@
+/**
+ * Attachment size policy.
+ *
+ * The limit is `limits.singleFileBytes` from the catalog's access grant, currently 25 MB.
+ *
+ * Callers pass the runtime limit; without one the 50 MB fallback applies, which only matters in the
+ * narrow window before the grant has hydrated.
+ */
+
+export const FALLBACK_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
+/** The limit as shown in copy, in MB. Rounded down: better to understate than to promise a size that cannot be attached. */
+export function attachmentLimitMegabytes(limitBytes: number): number {
+  return Math.floor(limitBytes / (1024 * 1024));
+}
+
+/** @deprecated Use the runtime `limits.singleFileBytes`; kept only as a fallback for older imports. */
+export const MAX_CHAT_ATTACHMENT_BYTES = FALLBACK_ATTACHMENT_BYTES;
+
+export function isOversizedChatAttachment(file: File, limitBytes: number = FALLBACK_ATTACHMENT_BYTES): boolean {
+  if (limitBytes <= 0) return false;
+  return file.size > limitBytes;
+}
+
+/**
+ * Hard cap on the number of attachments in a single message.
+ *
+ * Semantics:
+ *  - Images, files and videos count together, never separately.
+ *  - Accept the prefix that fits the remaining quota and reject the rest, reporting how many were
+ *    rejected. The whole batch is never rejected.
+ *  - A limit of 0 or less rejects everything.
+ *
+ * The limit comes from `resolveFileExtractionLimits(model).maxFiles`: the `maxAttachments` the model
+ * declares, or 3 when it declares none. Before raising it, check the single-document limit described below.
+ *
+ * Beyond the "lost in the middle" problem with many files, this gate also protects the sync backend:
+ * hundreds of attachments on one message push the attachments array, which carries a base64
+ * thumbnail per item, past the 1MiB per-document limit. That limit is only checked at commit time on
+ * the server, so the whole batch of messages would be permanently rejected.
+ */
+export function limitAttachmentCount<T>(
+  existingCount: number,
+  incoming: T[],
+  maxAttachments: number,
+): { accepted: T[]; rejectedCount: number } {
+  const availableSlots = maxAttachments > 0 ? Math.max(maxAttachments - existingCount, 0) : 0;
+  if (incoming.length <= availableSlots) return { accepted: incoming, rejectedCount: 0 };
+  return {
+    accepted: incoming.slice(0, availableSlots),
+    rejectedCount: incoming.length - availableSlots,
+  };
+}
+
+export function partitionFilesByAttachmentSize(
+  files: File[],
+  limitBytes: number = FALLBACK_ATTACHMENT_BYTES,
+): { accepted: File[]; oversized: File[] } {
+  return files.reduce(
+    (result, file) => {
+      if (isOversizedChatAttachment(file, limitBytes)) {
+        result.oversized.push(file);
+      } else {
+        result.accepted.push(file);
+      }
+      return result;
+    },
+    { accepted: [] as File[], oversized: [] as File[] },
+  );
+}

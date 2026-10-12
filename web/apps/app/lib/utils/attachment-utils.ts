@@ -1,0 +1,419 @@
+import * as Sentry from '@sentry/nextjs';
+import type { Attachment, AttachmentKind } from '@oriveo/shared';
+import { saveImage } from '../infra/storage/image-store';
+import { compressImage, createImageThumbnail, readFileAsBase64, base64ToBlob } from './image-utils';
+import { parseOfficeFile } from './office-parser';
+import { createCanonicalUUID } from './id-utils';
+import { MAX_CHAT_ATTACHMENT_BYTES, isOversizedChatAttachment } from './attachment-size-policy';
+import { DEFAULT_LIMITS, type ExtractedText, type FileExtractionLimits, FileTextExtractor } from '../core/attachments/file-text-extractor';
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_VIDEO_TYPES = [
+  'video/mp4',
+  'video/mpeg',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-flv',
+  'video/webm',
+  'video/x-ms-wmv',
+  'video/3gpp',
+];
+
+// MIME types that can be read as plain text
+const TEXT_MIME_TYPES = [
+  'text/plain',
+  'text/csv',
+  'text/markdown',
+  'text/html',
+  'text/css',
+  'text/xml',
+  'text/javascript',
+  'application/json',
+  'application/xml',
+  'application/javascript',
+  'application/x-yaml',
+  'application/x-sh',
+];
+
+// File extensions readable as text, used when the browser MIME type is unreliable
+const TEXT_EXTENSIONS = [
+  '.txt', '.csv', '.md', '.json', '.xml', '.html', '.css',
+  '.js', '.ts', '.jsx', '.tsx', '.py', '.rb', '.go', '.rs',
+  '.java', '.kt', '.swift', '.c', '.cpp', '.h', '.hpp',
+  '.sh', '.bash', '.zsh', '.yaml', '.yml', '.toml', '.ini',
+  '.env', '.log', '.sql', '.graphql', '.proto',
+];
+
+// Office binary formats officeParser can parse
+const OFFICE_MIME_TYPES = [
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',       // .docx
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',             // .xlsx
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',     // .pptx
+  'application/vnd.oasis.opendocument.text',                                       // .odt
+  'application/vnd.oasis.opendocument.spreadsheet',                                // .ods
+  'application/vnd.oasis.opendocument.presentation',                               // .odp
+  'application/rtf',                                                               // .rtf
+  'text/rtf',                                                                      // .rtf (alternative)
+];
+
+const OFFICE_EXTENSIONS = [
+  '.docx', '.xlsx', '.pptx', '.odt', '.ods', '.odp', '.rtf',
+];
+
+const EPUB_MIME_TYPE = 'application/epub+zip';
+
+const ALLOWED_FILE_TYPES = [
+  ...ALLOWED_IMAGE_TYPES,
+  ...ALLOWED_VIDEO_TYPES,
+  'application/pdf',
+  EPUB_MIME_TYPE,
+  ...TEXT_MIME_TYPES,
+  ...OFFICE_MIME_TYPES,
+];
+
+export interface ValidationResult {
+  valid: boolean;
+  error?: string;
+  /** Over the size limit: lets the caller show "file too large" rather than treat it as an unsupported type. */
+  tooLarge?: boolean;
+}
+
+export function validateFile(file: File): ValidationResult {
+  if (isOversizedChatAttachment(file)) {
+    return { valid: false, tooLarge: true, error: `File too large (max ${MAX_CHAT_ATTACHMENT_BYTES / 1024 / 1024}MB)` };
+  }
+  if (
+    !ALLOWED_FILE_TYPES.includes(file.type) &&
+    !isTextFileByExtension(file.name) &&
+    !isOfficeFileByExtension(file.name) &&
+    !isEpubByExtension(file.name) &&
+    // .htm and .xhtml are not in the text extension list, because HTML is extracted rather than
+    // forwarded; they still have to get past validation to reach the extractor.
+    !isHtmlFile(file)
+  ) {
+    return { valid: false, error: `Unsupported file type: ${file.type || file.name}` };
+  }
+  return { valid: true };
+}
+
+function isEpubByExtension(name: string): boolean {
+  return name.toLowerCase().endsWith('.epub');
+}
+
+/** Whether the file can be read as text. */
+export function isTextFile(file: File): boolean {
+  return TEXT_MIME_TYPES.includes(file.type) || isTextFileByExtension(file.name);
+}
+
+/**
+ * HTML is readable as text but must not be *sent* as text.
+ *
+ * A saved web page is mostly markup: scripts, inline styles and attributes swamp the prose, so
+ * forwarding it verbatim spends the context window on tags and leaves the model guessing at the
+ * article. It goes through the HTML extractor instead, the same as on the other clients.
+ */
+export function isHtmlFile(file: File): boolean {
+  const lower = file.name.toLowerCase();
+  return file.type === 'text/html'
+    || file.type === 'application/xhtml+xml'
+    || ['.html', '.htm', '.xhtml'].some((ext) => lower.endsWith(ext));
+}
+
+/** Whether the file is an Office binary format that needs officeParser. */
+export function isOfficeFile(file: File): boolean {
+  return OFFICE_MIME_TYPES.includes(file.type) || isOfficeFileByExtension(file.name);
+}
+
+function isTextFileByExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+function isOfficeFileByExtension(name: string): boolean {
+  const lower = name.toLowerCase();
+  return OFFICE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+function fileToKind(file: File): AttachmentKind {
+  if (ALLOWED_VIDEO_TYPES.includes(file.type)) return 'video';
+  return ALLOWED_IMAGE_TYPES.includes(file.type) ? 'image' : 'file';
+}
+
+/**
+ * Plain text and Office-extracted text are truncated at import by the extractor's own rules (the same as PDF / EPUB / HTML).
+ *
+ * A file that is a single line over the byte cap (minified JSON and the like) is cut inside that line at a
+ * character boundary by the extractor, keeping the start.
+ * Exception: when the result is still empty (the text starts with a logical separator and the fallback backed
+ * off over all of it), the original text is returned and not marked truncated, so the import-time total-size
+ * gate rejects it the usual way and explains why, which beats adding an empty attachment.
+ */
+function truncateImportedText(raw: string, fileSizeBytes: number, limits: FileExtractionLimits): ExtractedText {
+  const extracted = FileTextExtractor.truncate(raw, fileSizeBytes, limits);
+  if (extracted.truncated && extracted.content.length === 0 && raw.length > 0) {
+    return { content: raw, totalLines: extracted.totalLines, truncated: false, sizeBytes: fileSizeBytes };
+  }
+  return extracted;
+}
+
+/** `limits`: the truncation limits for extracted text. The import pipeline passes the current model's; defaults otherwise. */
+export async function fileToAttachment(
+  file: File,
+  limits: FileExtractionLimits = DEFAULT_LIMITS,
+): Promise<Attachment> {
+  const rawBase64 = await readFileAsBase64(file);
+  const kind = fileToKind(file);
+
+  // Images are compressed to JPEG and stored in a separate ImageStore.
+  if (kind === 'image') {
+    const compressed = await compressImage(rawBase64, file.type);
+    // A failed compression (the browser cannot decode the image, or no canvas context is
+    // available) must not degrade the whole attachment: the original bytes are still a valid
+    // image the user picked, so they go into the ImageStore and the send path as usual, just
+    // uncompressed and without a thumbnail. mime and fileName then have to fall back to the
+    // original file's -- labelling everything image/jpeg unconditionally would send PNG bytes
+    // upstream as JPEG. When the thumbnail is null, thumbnailBase64 is not written at all, so
+    // AttachmentPreview falls back to the file icon and sync never pushes the full-size base64
+    // to the sync backend.
+    const imageData = compressed?.data ?? rawBase64;
+    const imageMime = compressed?.mime ?? file.type;
+    const thumbnailBase64 = await createImageThumbnail(imageData, imageMime);
+
+    // base64 -> Blob, stored in the ImageStore.
+    const imageId = createCanonicalUUID();
+    const imageBlob = await base64ToBlob(imageData, imageMime);
+    const thumbBlob = thumbnailBase64 ? await base64ToBlob(thumbnailBase64, 'image/jpeg') : null;
+    await saveImage(imageId, imageBlob, thumbBlob, imageMime);
+
+    return {
+      id: createCanonicalUUID(),
+      kind,
+      fileName: compressed ? 'image.jpg' : file.name,
+      mimeType: imageMime,
+      localImageID: imageId,
+      ...(thumbnailBase64 ? { thumbnailBase64 } : {}),
+      originalSizeBytes: file.size,
+    };
+  }
+
+  if (kind === 'video') {
+    return {
+      id: createCanonicalUUID(),
+      kind,
+      fileName: file.name,
+      mimeType: file.type,
+      base64Data: rawBase64,
+      originalSizeBytes: file.size,
+    };
+  }
+
+  // Text files: decoded to UTF-8 plain text and sent as a text content part. HTML is excluded
+  // deliberately; it is extracted further down instead of being forwarded as markup.
+  if (isTextFile(file) && !isHtmlFile(file)) {
+    const extracted = truncateImportedText(await file.text(), file.size, limits);
+    return {
+      id: createCanonicalUUID(),
+      kind,
+      fileName: file.name,
+      mimeType: file.type || 'text/plain',
+      base64Data: extracted.content,
+      originalSizeBytes: file.size,
+      extractedTotalLines: extracted.totalLines,
+      extractedTruncated: extracted.truncated,
+      extractedSizeBytes: extracted.sizeBytes,
+    };
+  }
+
+  // Office binary formats: plain text is extracted with officeParser.
+  if (isOfficeFile(file)) {
+    try {
+      const extracted = truncateImportedText(await parseOfficeFile(file), file.size, limits);
+      return {
+        id: createCanonicalUUID(),
+        kind,
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64Data: extracted.content,
+        downloadBase64Data: rawBase64,
+        // Office mime types keep originalBase64Data as well, so AttachmentRouter can choose the
+        // native route (only OpenAI Responses accepts docx/xlsx/pptx as an input_file).
+        originalBase64Data: rawBase64,
+        originalSizeBytes: file.size,
+        extractedTotalLines: extracted.totalLines,
+        extractedTruncated: extracted.truncated,
+        extractedSizeBytes: extracted.sizeBytes,
+      };
+    } catch (e: unknown) {
+      const err = e as { name?: string; code?: string; message?: string };
+      const msg = String(err?.message ?? '').toLowerCase();
+      // A classified ExtractionError keeps its own code: an oversized archive must not be reported
+      // to the model as a corrupted one.
+      const errorCode = err?.name === 'ExtractionError' && err.code
+        ? err.code
+        : (msg.includes('encrypted') || msg.includes('password') || msg.includes('protected'))
+          ? 'password_protected_office'
+          : 'corrupted_file';
+      return {
+        id: createCanonicalUUID(),
+        kind,
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64Data: '',
+        downloadBase64Data: rawBase64,
+        originalBase64Data: rawBase64,
+        originalSizeBytes: file.size,
+        extractionErrorCode: errorCode,
+      };
+    }
+  }
+
+  // PDF / EPUB / HTML: extracted locally through FileTextExtractor.
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const isEpub = file.type === 'application/epub+zip' || file.name.toLowerCase().endsWith('.epub');
+  const isHtml = isHtmlFile(file);
+
+  if (isPdf || isEpub || isHtml) {
+    try {
+      const { FileTextExtractor, ExtractionError } = await import('../core/attachments/file-text-extractor');
+      const extracted = await FileTextExtractor.extract(file, limits);
+      return {
+        id: createCanonicalUUID(),
+        kind,
+        fileName: file.name,
+        mimeType: file.type || 'text/plain',
+        base64Data: extracted.content,
+        downloadBase64Data: isPdf ? rawBase64 : undefined,  // PDF keeps the original binary
+        originalBase64Data: isPdf ? rawBase64 : undefined,  // used by the fallback path
+        originalSizeBytes: file.size,
+        extractedTotalLines: extracted.totalLines,
+        extractedTruncated: extracted.truncated,
+        extractedSizeBytes: extracted.sizeBytes,
+      };
+    } catch (e: unknown) {
+      const err = e as { name?: string; code?: string; message?: string };
+      if (err?.name === 'ExtractionError') {
+        const code = err.code as string;
+        return {
+          id: createCanonicalUUID(),
+          kind,
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          base64Data: '',
+          downloadBase64Data: isPdf ? rawBase64 : undefined,
+          originalBase64Data: isPdf ? rawBase64 : undefined,
+          originalSizeBytes: file.size,
+          extractionErrorCode: code,
+        };
+      }
+      // Any other unexpected error.
+      return {
+        id: createCanonicalUUID(),
+        kind,
+        fileName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        base64Data: '',
+        originalSizeBytes: file.size,
+        extractionErrorCode: 'extraction_error',
+      };
+    }
+  }
+
+  // Any other binary attachment: embedded as base64 as a last resort.
+  return {
+    id: createCanonicalUUID(),
+    kind,
+    fileName: file.name,
+    mimeType: file.type,
+    base64Data: rawBase64,
+    originalSizeBytes: file.size,
+  };
+}
+
+/**
+ * Validate and convert a batch of files into Attachment values.
+ * Shared by ChatView (drag and drop, paste) and InputComposer (file picker).
+ *
+ * `source` is used for telemetry drill-down and does not affect the conversion.
+ * `providerKind` feeds the attachment-by-provider matrix; callers should pass the current
+ * conversation's provider.kind normalized to snake_case through `telemetryProviderKind()`, and
+ * `unknown` is reported when it is missing.
+ */
+export function validateAndConvertFiles(
+  files: File[],
+  source: 'file' | 'drag_drop' | 'paste' = 'file',
+  providerKind?: string,
+  onFileFailed?: (file: File) => void,
+  onFileTooLarge?: (file: File) => void,
+  limits: FileExtractionLimits = DEFAULT_LIMITS,
+): Promise<Attachment[]> {
+  // Imports are queued. The file picker, drag and drop, and paste are three entry points, and a
+  // user can start another batch while the previous one is still being read. Every file is read
+  // into memory in full (a base64 string, plus an ArrayBuffer read again by the extractor). Files
+  // within a batch were already handled one at a time; queueing batches as well keeps the peak at
+  // a single file.
+  const run = importQueue.then(() => convertFilesInOrder(files, source, providerKind, onFileFailed, onFileTooLarge, limits));
+  importQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+let importQueue: Promise<void> = Promise.resolve();
+
+async function convertFilesInOrder(
+  files: File[],
+  source: 'file' | 'drag_drop' | 'paste',
+  providerKind: string | undefined,
+  onFileFailed: ((file: File) => void) | undefined,
+  onFileTooLarge: ((file: File) => void) | undefined,
+  limits: FileExtractionLimits,
+): Promise<Attachment[]> {
+  const { trackEvent } = await import('../core/telemetry');
+  const attachments: Attachment[] = [];
+  for (const file of files) {
+    const result = validateFile(file);
+    if (!result.valid) {
+      // A file over the limit is not read, but the caller is told so it can explain why the
+      // attachment never reached the tray instead of the file vanishing without a word.
+      if (result.tooLarge) onFileTooLarge?.(file);
+      continue;
+    }
+    let attachment: Attachment;
+    try {
+      attachment = await fileToAttachment(file, limits);
+    } catch (err) {
+      // Per-file fault boundary: any failure drops only this file and notifies the caller, while
+      // files already converted in the batch and those still queued go through as usual.
+      //
+      // - A File is only a handle to a file on disk. Files dragged out of an archive or a
+      //   cloud-drive placeholder on Windows, or moved after being picked, fail only when their
+      //   bytes are read (NotFoundError / NotReadableError). That is an environment condition and
+      //   is not reported.
+      // - Everything else (an image that cannot be stored in IndexedDB, a huge file whose base64
+      //   exceeds the string length limit, a decoder throwing) used to propagate. None of the
+      //   three entry points catches it, so it became an unhandled rejection and the whole batch,
+      //   including files already converted, vanished without any notice. These are still
+      //   defects worth knowing about, so they are reported explicitly rather than by leaking.
+      if (!isUnreadableFileError(err)) {
+        Sentry.captureException(err, {
+          level: 'warning',
+          tags: { module: 'attachment.import', 'attachment.source': source },
+          extra: { mimeType: file.type || 'unknown', sizeBytes: file.size },
+        });
+      }
+      onFileFailed?.(file);
+      continue;
+    }
+    attachments.push(attachment);
+    trackEvent('attachment_added', {
+      mime_type: file.type || 'unknown',
+      size_bytes: file.size,
+      kind: attachment.kind,
+      source,
+      provider_kind: providerKind ?? 'unknown',
+    });
+  }
+  return attachments;
+}
+
+function isUnreadableFileError(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name;
+  return name === 'NotFoundError' || name === 'NotReadableError';
+}

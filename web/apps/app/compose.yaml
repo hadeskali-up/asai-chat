@@ -1,0 +1,53 @@
+# asAi Chat — production compose for chat.serverasai.com.
+#
+# One long-lived Node service. The host reverse proxy (the same one that fronts
+# serveras.click / serverasai.com) terminates TLS for chat.serverasai.com and forwards to
+# 127.0.0.1:${ASAI_CHAT_PORT}. The container publishes its port only on the loopback interface,
+# so the proxy is the only way in — there is no direct public path to the app.
+#
+# This service is deliberately standalone: the chat app holds no server-side asAi credential.
+# Every request carries the customer's own key from their browser, so the app needs no access to
+# the gateway database, no secrets, and no internal network.
+#
+# Bring up:
+#   ASAI_CHAT_IMAGE=asai-chat:$(git rev-parse --short HEAD) \
+#   docker compose -f web/apps/app/compose.yaml up -d
+
+name: asai-chat
+
+services:
+  chat:
+    image: ${ASAI_CHAT_IMAGE:?immutable chat image tag is required}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+    ports:
+      # Loopback only: the host proxy connects here; nothing else can.
+      - "127.0.0.1:${ASAI_CHAT_PORT:-3002}:3001"
+    read_only: true
+    tmpfs:
+      # Next.js writes a small amount of runtime cache under .next/cache.
+      - /repo/apps/app/.next/cache:rw,noexec,nosuid,nodev,size=64m
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 768m
+    cpus: 1.00
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:3001/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

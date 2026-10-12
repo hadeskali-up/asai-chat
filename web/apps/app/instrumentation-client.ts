@@ -1,0 +1,80 @@
+import {
+  isErrorThrownEntirelyByBrowserExtension,
+  isHydrationErrorEvent,
+  isIgnorableBrowserExtensionError,
+  isIgnorableCloudflareChallengeError,
+  isIgnorableMobileBrowserInjection,
+} from "@oriveo/shared";
+import { installDetachedHoistableGuard } from "@oriveo/shared/browser/detached-hoistable-guard";
+import * as Sentry from "@sentry/nextjs";
+import { isIgnorableNextDevHmrError } from "./lib/sentry/ignore-dev-hmr";
+import { isIgnorableBrowserNoiseError } from "./lib/sentry/ignore-browser-noise";
+import { isIgnorableMicrosoftTranslatorHydration } from "./lib/sentry/ignore-translator-noise";
+import { isProviderResponseErrorHint, liftProviderErrorDetail } from "./lib/sentry/provider-error-detail";
+import { redactSentryBreadcrumb, redactSentryEvent, redactSentrySpan } from "./lib/sentry/redact-url";
+import { installLocalStorageQuotaGuard } from "./lib/infra/storage/quota-reclaim";
+
+// Installed at the earliest client entry point rather than lazily, because the code that suffers
+// most from a full localStorage quota is third-party SDK code we cannot reach into. The guard has
+// to already be in place when their first write fails.
+installLocalStorageQuotaGuard();
+
+// Also has to run before hydration. When a third-party script detaches a <meta>, <title> or
+// <link> that React hoisted into <head> (some mobile browsers rewrite the viewport tag in their
+// desktop mode), the next route change throws halfway through the commit and navigation stops
+// responding until a reload. See packages/shared/src/browser/detached-hoistable-guard.ts.
+installDetachedHoistableGuard();
+
+// Error reporting is opt-in: with no DSN configured, Sentry.init installs a client that sends
+// nothing, so a default deployment reports nowhere.
+Sentry.init({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  environment: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+  release: process.env.NEXT_PUBLIC_APP_VERSION,
+  tracesSampleRate: 0.1,
+  // Replay quota is small on Sentry's free and entry plans, so it is spent on sessions that
+  // hit an error. Randomly sampled sessions carry no error context to debug with.
+  replaysOnErrorSampleRate: 1.0,
+  replaysSessionSampleRate: 0,
+  // The default depth of 3 stops one level above `contexts.<name>.<field>[i]`, and objects below
+  // the cut are replaced in place with the literal "[Object]" without any warning. Diagnostic
+  // context that lives in an array is invisible at the default.
+  normalizeDepth: 5,
+  integrations: [
+    Sentry.replayIntegration({
+      // Hydration errors are still reported, but do not flush a replay: they fire within a few
+      // seconds of first paint, so the buffer holds little more than the initial snapshot. A
+      // Sentry inbound filter that discards the error would not discard the replay it triggered.
+      beforeErrorSampling: (event) => !isHydrationErrorEvent(event),
+      // This control only resets local state. The click and the replay are still recorded; it just
+      // should not be reported as a slow or rage click.
+      slowClickIgnoreSelectors: [
+        '[data-sentry-ignore-slow-click="sync-state-reset"]',
+      ],
+    }),
+    Sentry.browserTracingIntegration(),
+  ],
+  beforeSend(event, hint) {
+    if (isProviderResponseErrorHint(hint)) return null;
+    if (isIgnorableNextDevHmrError(event, hint)) return null;
+    if (isIgnorableBrowserExtensionError(event)) return null;
+    // By origin rather than wording: the whole call stack, cause chain included, sits inside an
+    // extension script. This has to read the raw stack on the hint, because the SDK rewrites the
+    // origin of extension frames to app:// before beforeSend runs.
+    if (isErrorThrownEntirelyByBrowserExtension(hint)) return null;
+    // A bot-check script injected by a CDN can throw on its own internals, such as reading
+    // contentWindow of an iframe it already removed. None of it is application code.
+    if (isIgnorableCloudflareChallengeError(event)) return null;
+    if (isIgnorableMicrosoftTranslatorHydration(event)) return null;
+    if (isIgnorableMobileBrowserInjection(event)) return null;
+    if (isIgnorableBrowserNoiseError(event)) return null;
+    return redactSentryEvent(liftProviderErrorDetail(event, hint));
+  },
+  // Page-load and navigation transaction events carry the page address (the OAuth callback URL contains the authorization code), so they are redacted as well.
+  beforeSendTransaction: (event) => redactSentryEvent(event),
+  beforeBreadcrumb: redactSentryBreadcrumb,
+  // Browser tracing records outgoing fetch URLs on spans, so the same redaction applies here.
+  beforeSendSpan: redactSentrySpan,
+});
+
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;

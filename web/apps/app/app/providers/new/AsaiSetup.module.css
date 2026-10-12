@@ -1,0 +1,154 @@
+.page {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--color-bg, #0b0d12);
+}
+
+.card {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px 24px 24px;
+  border-radius: 16px;
+  background: var(--color-surface, #14171f);
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.32);
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6d5efc, #38bdf8);
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+  font-weight: 650;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.66));
+}
+
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--color-surface-2, rgba(255, 255, 255, 0.04));
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.stepList {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.guideLink {
+  align-self: flex-start;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--color-accent, #7c8cff);
+  text-decoration: none;
+}
+
+.guideLink:hover,
+.guideLink:focus-visible {
+  text-decoration: underline;
+}
+
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keyInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
+  background: var(--color-bg, #0b0d12);
+  color: inherit;
+  font: inherit;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13.5px;
+}
+
+.keyInput:focus-visible {
+  outline: 2px solid var(--color-accent, #7c8cff);
+  outline-offset: 1px;
+}
+
+.revealButton {
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.14));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.revealButton:hover,
+.revealButton:focus-visible {
+  background: var(--color-surface-2, rgba(255, 255, 255, 0.06));
+}
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-danger, #ff6b6b);
+}
+
+.privacyNote {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.55));
+}
+
+/* Respect reduced-motion: no transitions are declared, but keep this explicit for
+   any future addition so the requirement is visible at the point of change. */
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .revealButton,
+  .guideLink {
+    transition: none;
+  }
+}

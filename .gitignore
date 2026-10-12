@@ -1,0 +1,60 @@
+# Editor and operating-system noise
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.log
+.eslintcache
+
+# Secrets and machine-local configuration
+.env
+.env.local
+.env.*.local
+local.properties
+sentry.properties
+*.keystore
+*.jks
+google-services.json
+GoogleService-Info.plist
+
+# Node / Next.js
+node_modules/
+.next/
+.next-dev/
+.turbo/
+.vercel/
+out/
+out-desktop/
+coverage/
+*.tsbuildinfo
+bun.lock
+
+# Written by `next dev` on every run, not source. next-env.d.ts points at whichever
+# distDir the last run used, and the agent rule files are re-created by Next itself.
+next-env.d.ts
+/web/apps/app/AGENTS.md
+/web/apps/app/CLAUDE.md
+
+# Gradle / Android
+.gradle/
+build/
+.cxx/
+captures/
+.kotlin/
+*.iml
+.idea/
+
+# Xcode / Swift
+DerivedData/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.mobileprovision
+*.p12
+Pods/
+.sentry-native
+
+# Android release artifacts
+android/app/release/

@@ -1,0 +1,431 @@
+{
+  "$comment": "Field layout and validation for the relay connection form, shared across clients. Adding a connection and editing a saved one use the same field order and the same validation function: `form.fields` pins the layout, `cases` pin the verdicts. The four credential states crossed with create and edit are the point of the file - the question \"does this connection need a key?\" used to be answered separately by the edit path, the create path and the status badge, which is how a connection with authentication set to none became impossible to save and impossible to change. `labelEN` is the one label wording every client can assert against: each resolves its own English string and compares it to this value.",
+  "version": 1,
+  "form": {
+    "$comment": "Array order is the top-to-bottom render order, and both the create and the edit form follow it, so the two layouts cannot drift apart. `placeholder` is null when the row has no placeholder or its placeholder is dynamic - the model row shows an id taken from the live catalog. `revalidation` says whether editing the row invalidates the current probe result.",
+    "fields": [
+      {
+        "field": "endpoint",
+        "group": "connection",
+        "labelEN": "Request URL",
+        "placeholder": "https://api.example.com/v1",
+        "revalidation": "always"
+      },
+      {
+        "field": "security_mode",
+        "group": "connection",
+        "labelEN": "Connection security",
+        "placeholder": null,
+        "revalidation": "always"
+      },
+      {
+        "field": "api_key",
+        "group": "connection",
+        "labelEN": "API Key",
+        "placeholder": "sk-...",
+        "revalidation": "always"
+      },
+      {
+        "field": "model_id",
+        "group": "connection",
+        "labelEN": "Model",
+        "placeholder": null,
+        "revalidation": "unless_within_discovered_catalog"
+      },
+      {
+        "field": "transport",
+        "group": "protocol",
+        "labelEN": "Protocol",
+        "placeholder": null,
+        "revalidation": "always"
+      },
+      {
+        "field": "auth_mode",
+        "group": "protocol",
+        "labelEN": "Authentication",
+        "placeholder": null,
+        "revalidation": "always"
+      },
+      {
+        "field": "headers",
+        "group": "advanced_http",
+        "labelEN": "Custom Headers",
+        "placeholder": "X-Internal-Token",
+        "revalidation": "always"
+      },
+      {
+        "field": "query_params",
+        "group": "advanced_http",
+        "labelEN": "Custom Query Params",
+        "placeholder": "tenant",
+        "revalidation": "always"
+      }
+    ]
+  },
+  "credentialMatrix": [
+    {
+      "state": "never_entered_requires_credential",
+      "$comment": "No key has ever been entered and this connection needs one. Creating must be blocked; editing must not be. An empty field in edit mode means \"leave the stored key alone\", and a genuinely missing credential is reported by the connection's own status, not by refusing to save an unrelated field."
+    },
+    {
+      "state": "never_entered_auth_none",
+      "$comment": "No key has ever been entered and authentication is set to none. Both modes are valid: a keyless connection must not be pushed towards some other, less capable entry point."
+    },
+    {
+      "state": "stored_only_other_fields_changed",
+      "$comment": "A key is already stored and this edit only touches other fields. An empty field in edit mode means \"do not change it\"; create mode has no stored key, so the equivalent is a key typed into the form now."
+    },
+    {
+      "state": "explicit_removal",
+      "$comment": "The user removes the key on purpose. Only the key is cleared - the authentication mode is not silently changed along with it, and editing still must not make a credential mandatory."
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "never_entered_requires_credential_create",
+      "matrixState": "never_entered_requires_credential",
+      "mode": "create",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "api_key",
+            "code": "credential_required"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "never_entered_requires_credential_edit",
+      "matrixState": "never_entered_requires_credential",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "gpt-5.6-sol",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "never_entered_auth_none_create",
+      "matrixState": "never_entered_auth_none",
+      "mode": "create",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "none",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "never_entered_auth_none_edit",
+      "matrixState": "never_entered_auth_none",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "none",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "stored_only_other_fields_changed_create",
+      "matrixState": "stored_only_other_fields_changed",
+      "mode": "create",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "sk-relay-0123456789abcdef",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "gpt-5.6-sol",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "stored_only_other_fields_changed_edit",
+      "matrixState": "stored_only_other_fields_changed",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "claude-opus-4-6",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": true
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "explicit_removal_create",
+      "matrixState": "explicit_removal",
+      "mode": "create",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "gpt-5.6-sol",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "api_key",
+            "code": "credential_required"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "explicit_removal_edit",
+      "matrixState": "explicit_removal",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "gpt-5.6-sol",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "endpoint_required_create",
+      "mode": "create",
+      "draft": {
+        "endpoint": "   ",
+        "apiKey": "",
+        "authMode": "none",
+        "securityMode": "remote_https",
+        "transport": "auto",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "endpoint",
+            "code": "endpoint_required"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "cleartext_endpoint_rejected_create",
+      "$comment": "An http:// address while the connection claims public HTTPS. The endpoint policy owns this verdict; the form does not keep a second copy of the rule.",
+      "mode": "create",
+      "draft": {
+        "endpoint": "http://relay.example.com/v1",
+        "apiKey": "sk-relay-0123456789abcdef",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "endpoint",
+            "code": "endpoint_rejected",
+            "detail": "cleartext_not_allowed"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "local_http_keyless_edit_allowed",
+      "$comment": "A local engine reached over plain http. The edit form used to measure every address against the public-HTTPS rule, which made this address permanently invalid and blocked saving even a rename.",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "http://192.168.1.20:1234/v1",
+        "apiKey": "",
+        "authMode": "none",
+        "securityMode": "local_http",
+        "transport": "openai_chat_completions",
+        "modelId": "qwen3-8b",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": true,
+        "issues": []
+      }
+    },
+    {
+      "caseId": "cleartext_credentials_edit",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "http://192.168.1.20:1234/v1",
+        "apiKey": "",
+        "authMode": "bearer",
+        "securityMode": "local_http",
+        "transport": "openai_chat_completions",
+        "modelId": "qwen3-8b",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": true
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "api_key",
+            "code": "cleartext_credentials",
+            "detail": "cleartext_credentials"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "cleartext_sensitive_header_edit",
+      "$comment": "Authentication is none and no key is set, but a custom header carries credential material. The issue is reported on the headers row, where the user can act on it.",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "http://192.168.1.20:1234/v1",
+        "apiKey": "",
+        "authMode": "none",
+        "securityMode": "local_http",
+        "transport": "openai_chat_completions",
+        "modelId": "qwen3-8b",
+        "headers": [
+          {
+            "key": "X-Internal-Token",
+            "value": "abc"
+          }
+        ],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "headers",
+            "code": "cleartext_credentials",
+            "detail": "cleartext_credentials"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "security_mode_scheme_mismatch_edit",
+      "$comment": "The address is encrypted while the declared mode says cleartext. The form reports the mismatch and asks the user to change the mode; it never quietly rewrites the mode to match the address.",
+      "mode": "edit",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "",
+        "authMode": "none",
+        "securityMode": "local_http",
+        "transport": "openai_chat_completions",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "security_mode",
+            "code": "security_mode_scheme_mismatch"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "credential_invalid_characters_create",
+      "$comment": "A key pasted with a full-width space in it (U+3000), which a CJK input method inserts easily. Character validation runs only on a non-empty value, because an empty key is legitimate both when authentication is none and when an edit leaves the stored key untouched.",
+      "mode": "create",
+      "draft": {
+        "endpoint": "https://relay.example.com/v1",
+        "apiKey": "sk-relay-0123　456789abcdef",
+        "authMode": "bearer",
+        "securityMode": "remote_https",
+        "transport": "openai_chat_completions",
+        "modelId": "",
+        "headers": [],
+        "queryParams": [],
+        "hasSavedCredential": false
+      },
+      "expect": {
+        "valid": false,
+        "issues": [
+          {
+            "field": "api_key",
+            "code": "credential_invalid_characters"
+          }
+        ]
+      }
+    }
+  ]
+}
