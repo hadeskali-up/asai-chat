@@ -1,4 +1,4 @@
-const CACHE_NAME = 'oriveo-v3';
+const CACHE_NAME = 'asai-chat-v4';
 const STATIC_ASSETS = [
   '/',
   '/offline.html',

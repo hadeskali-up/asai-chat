@@ -17,6 +17,7 @@ import { useTheme } from '../lib/hooks/useTheme';
 import { bootstrapApp, type BootstrapResult } from '../lib/core/bootstrap';
 import { Skeleton } from '../components/Skeleton';
 import { trackEvent } from '../lib/core/telemetry';
+import { repairAsaiVisionCatalogIfNeeded } from '../lib/core/providers/asai-vision-catalog-repair';
 
 type Store = ReturnType<typeof createAppStore>;
 
@@ -77,6 +78,8 @@ export function StoreProvider({ children }: StoreProviderProps) {
       .then((_result: BootstrapResult) => {
         if (signal.cancelled) return;
         ensureSubscribed();
+        // Repair old asAi catalogs after the provider subscriber is ready; never block first paint.
+        void repairAsaiVisionCatalogIfNeeded(store).catch(() => {});
       })
       .catch((err) => {
         console.error('[StoreProvider] Bootstrap failed:', err);

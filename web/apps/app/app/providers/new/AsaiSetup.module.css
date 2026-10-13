@@ -30,8 +30,8 @@
 .logo {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #6d5efc, #38bdf8);
+  display: block;
+  object-fit: contain;
 }
 
 .title {

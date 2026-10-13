@@ -9,6 +9,8 @@ interface BuildCatalogModelOptions {
   providerKind: ProviderKind | string;
   runtimeModelId: string;
   fallbackName: string;
+  /** Capability declaration from a directly synced OpenAI-compatible catalog. */
+  fallbackCapabilities?: string[];
   fallbackContextLength?: number;
   fallbackSummary?: string;
   createdAt?: number;
@@ -18,12 +20,13 @@ export function buildCatalogModel({
   providerKind,
   runtimeModelId,
   fallbackName,
+  fallbackCapabilities,
   fallbackContextLength,
   fallbackSummary,
   createdAt,
 }: BuildCatalogModelOptions): AIModel {
   const resolved = resolveCatalogDecorations(runtimeModelId, providerKind);
-  const capabilities = resolved.metadata?.capabilities ?? ['text'];
+  const capabilities = resolved.metadata?.capabilities ?? fallbackCapabilities ?? ['text'];
   const pricePresentation = resolveModelPricePresentation(resolved.metadata);
   const contextLength = resolved.metadata?.contextLength ?? fallbackContextLength;
 

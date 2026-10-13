@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "Oriveo",
-  "short_name": "Oriveo",
-  "description": "Every model, one app. A bring-your-own-key AI chat client that runs in your browser.",
+  "name": "asAi Chat",
+  "short_name": "asAi Chat",
+  "description": "Chat with every model using your asAi credit.",
   "categories": ["productivity", "utilities"],
   "lang": "en",
   "dir": "auto",

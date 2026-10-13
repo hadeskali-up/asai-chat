@@ -185,6 +185,22 @@ function buildModelDirect(remote: OpenAIRemoteModel): AIModel {
     providerKind: 'openAI',
     runtimeModelId: remote.id,
     fallbackName: remote.id,
+    fallbackCapabilities: inputModalitiesToCapabilities(remote.input_modalities),
     createdAt: remote.created,
   });
+}
+
+/**
+ * Keep only capability names the client understands. A direct catalog is untrusted, and storing
+ * arbitrary modality labels as capabilities would accidentally make future server fields UI gates.
+ * Absence (or an all-unknown declaration) keeps the conservative text-only fallback.
+ */
+function inputModalitiesToCapabilities(inputModalities: string[] | undefined): string[] | undefined {
+  if (!Array.isArray(inputModalities)) return undefined;
+  const supported = inputModalities.filter(
+    (modality): modality is 'text' | 'image' | 'video' => (
+      modality === 'text' || modality === 'image' || modality === 'video'
+    ),
+  );
+  return supported.length > 0 ? [...new Set(supported)] : undefined;
 }

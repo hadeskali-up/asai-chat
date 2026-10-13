@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   subscribeToChanges: vi.fn(() => () => {}),
   bootstrapApp: vi.fn(() => new Promise(() => {})),
   trackEvent: vi.fn(),
+  repairAsaiVisionCatalogIfNeeded: vi.fn(async () => {}),
 }));
 
 vi.mock('../lib/core/store/persistence', () => ({
@@ -20,6 +21,9 @@ vi.mock('../lib/core/bootstrap', () => ({
 
 vi.mock('../lib/core/telemetry', () => ({
   trackEvent: mocks.trackEvent,
+}));
+vi.mock('../lib/core/providers/asai-vision-catalog-repair', () => ({
+  repairAsaiVisionCatalogIfNeeded: mocks.repairAsaiVisionCatalogIfNeeded,
 }));
 
 vi.mock('../lib/hooks/useTheme', () => ({
@@ -89,5 +93,16 @@ describe('StoreProvider', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('app-ready')).toBeTruthy());
+  });
+
+  it('starts the existing asAi catalog repair only after the provider subscriber is active', async () => {
+    vi.useRealTimers();
+    mocks.bootstrapApp.mockResolvedValueOnce({ initialUser: null, authResolution: 'observed' });
+    mocks.repairAsaiVisionCatalogIfNeeded.mockImplementationOnce(async () => {
+      expect(mocks.subscribeToChanges).toHaveBeenCalledTimes(1);
+    });
+    render(<StoreProvider><div data-testid="app-ready" /></StoreProvider>);
+    await waitFor(() => expect(mocks.repairAsaiVisionCatalogIfNeeded).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('app-ready')).toBeTruthy();
   });
 });

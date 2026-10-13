@@ -144,7 +144,9 @@ export function AsaiSetup() {
     <div className={styles.page}>
       <div className={styles.card}>
         <div className={styles.hero}>
-          <div className={styles.logo} aria-hidden />
+          {/* The public asset is copied verbatim from token-gateway/static/brand/asai-mark.png. */}
+          {/* eslint-disable-next-line @next/next/no-img-element -- fixed local brand asset */}
+          <img className={styles.logo} src="/brand-logo.png" width={40} height={40} alt="" aria-hidden="true" />
           <h1 className={styles.title}>{t('title')}</h1>
           <p className={styles.subtitle}>{t('subtitle')}</p>
         </div>

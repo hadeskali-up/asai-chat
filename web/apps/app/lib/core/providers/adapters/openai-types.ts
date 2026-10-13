@@ -29,6 +29,8 @@ export interface OpenAIRemoteModel {
   object: string;
   created: number;
   owned_by: string;
+  /** Optional OpenAI-compatible declaration such as ["text", "image"]. */
+  input_modalities?: string[];
 }
 
 /** Content part in image generation response */

@@ -8,12 +8,9 @@ interface OriveoLogoProps {
 }
 
 /**
- * The Oriveo logo.
+ * The asAi Chat mark. The exported component name stays for upstream import compatibility.
  *
- * The mark is a raster gradient ring rather than something an SVG can draw procedurally, so this
- * renders `/brand-logo.png` (256px, transparent background — a dark tile behind the mark reads as a
- * pasted-on square, most obviously in a light theme). Bitmap scaling has none of the small-size
- * stroke-width problems the previous vector mark had, so there is no separate micro variant.
+ * Renders the canonical asAi mark copied from token-gateway/static/brand/asai-mark.png.
  *
  * The file lives in `apps/app/public/`, the only app that currently uses this component. Another
  * app adopting it has to ship the image too.
