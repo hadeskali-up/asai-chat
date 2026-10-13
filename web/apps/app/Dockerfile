@@ -46,6 +46,9 @@ COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=build /repo/ ./
 RUN useradd --system --uid 10001 --create-home nextjs && chown -R nextjs:nextjs /repo
 USER nextjs
+# Next resolves the production `.next` directory relative to its working directory. The
+# workspace build writes it under apps/app, while dependencies remain hoisted at /repo/node_modules.
+WORKDIR /repo/apps/app
 EXPOSE 3001
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
